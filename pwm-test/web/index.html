@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WokwiPWM Commander</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<script src="board_src.js"></script>  <!-- embedded board sources for file:// use -->
+
+<style>
+  :root {
+    color-scheme: dark;
+    --page:      #0d0d0d;
+    --surface:   #1a1a19;
+    --surface-2: #222220;
+    --ink:       #ffffff;
+    --ink-2:     #c3c2b7;
+    --muted:     #898781;
+    --grid:      #2c2c2a;
+    --border:    rgba(255,255,255,0.10);
+    --accent:    #3987e5;
+    --good:      #0ca30c;
+    --warn:      #fab219;
+    --crit:      #d03b3b;
+    --ch0: #3987e5;   /* blue    */
+    --ch1: #d95926;   /* orange  */
+    --ch2: #199e70;   /* aqua    */
+    --ch3: #c98500;   /* yellow  */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: .2px; }
+  header h1 span { color: var(--accent); }
+  .spacer { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 12px; border-radius: 999px; font-size: 12.5px;
+    border: 1px solid var(--border); color: var(--ink-2); background: var(--surface-2);
+  }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.ok::before   { background: var(--good); }
+  .pill.busy::before { background: var(--warn); animation: blink 1s infinite; }
+  .pill.err::before  { background: var(--crit); }
+  @keyframes blink { 50% { opacity: .3; } }
+  button {
+    font: inherit; color: var(--ink); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 14px; cursor: pointer; transition: background .12s, border-color .12s;
+  }
+  button:hover:not(:disabled) { background: #2a2a28; border-color: rgba(255,255,255,.2); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: transparent; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: #4a94ec; }
+  main {
+    display: grid; grid-template-columns: 450px 1fr; gap: 16px;
+    padding: 16px 20px; max-width: 1500px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .panel h2 {
+    font-size: 11.5px; font-weight: 650; text-transform: uppercase;
+    letter-spacing: .8px; color: var(--muted); margin: 0 0 10px;
+  }
+  .controls { display: flex; flex-direction: column; gap: 14px; align-self: start; }
+  .chan {
+    display: grid; grid-template-columns: 88px 1fr 1fr 1fr 1.25fr; gap: 8px;
+    align-items: center; padding: 8px 0; border-top: 1px solid var(--grid);
+  }
+  .chan:first-of-type { border-top: none; }
+  .chan .tag { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .chan label.name { font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+  .field { display: flex; flex-direction: column; gap: 2px; }
+  .field span { font-size: 10.5px; color: var(--muted); }
+  input[type=number], input[type=text] {
+    font: inherit; color: var(--ink); background: var(--page);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 8px; width: 100%;
+    font-variant-numeric: tabular-nums;
+  }
+  input[type=number]:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  input:disabled { opacity: .4; }
+  input.ro {
+    background: transparent; border-color: transparent; color: var(--ink-2);
+    padding-left: 2px; pointer-events: none;
+  }
+  input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
+  .row { display: flex; gap: 8px; align-items: end; }
+  .row .field { flex: 1; }
+  .checkrow { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--ink-2); font-size: 13px; }
+  .actions { display: flex; gap: 10px; }
+  .actions button { flex: 1; padding: 10px; }
+  .hint { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+  .stage { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  #plot { width: 100%; height: 430px; }
+  #plotEmpty {
+    height: 430px; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 13.5px; flex-direction: column; gap: 8px;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--grid);
+           font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; }
+  th:first-child, td:first-child { text-align: left; }
+  td .exp { color: var(--muted); font-size: 11.5px; }
+  td.chname { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+  #log {
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--page); border: 1px solid var(--grid); border-radius: 8px;
+    padding: 10px 12px; height: 160px; overflow-y: auto; white-space: pre-wrap;
+    color: var(--ink-2);
+  }
+  #log .err { color: #e66767; }
+  #log .dim { color: var(--muted); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; user-select: none; }
+  button.mini { padding: 2px 10px; font-size: 11.5px; margin-left: 10px; border-radius: 6px; }
+  .version { font-size: 11.5px; color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Wokwi<span>PWM</span> Commander</h1>
+  <span class="version" id="verInfo"></span>
+  <div class="spacer"></div>
+  <span class="pill" id="status">Disconnected</span>
+  <button class="primary" id="btnConnect">Connect board</button>
+</header>
+
+<main>
+  <aside class="controls">
+    <div class="panel">
+      <h2>PWM channels</h2>
+      <div id="channels"></div>
+      <div class="hint">period / duty / phase are 8-bit (0–255) project-clock
+        counts.  Unchecked channels are skipped.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Design clock</h2>
+      <div class="row">
+        <div class="field"><span>project clock (Hz)</span>
+          <input type="number" id="clockHz" value="10000" min="10" max="66000000"></div>
+        <button id="btnSetClock" disabled>Set clock</button>
+      </div>
+      <div class="hint">Applied immediately with <code>set_clock_hz()</code>.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Capture</h2>
+      <div class="row">
+        <div class="field"><span>length (s)</span>
+          <input type="number" id="seconds" value="2.0" min="0.05" step="0.1"></div>
+        <div class="field"><span>sample rate (Hz)</span>
+          <input type="number" id="sampleHz" value="10000" min="2000"></div>
+      </div>
+      <div class="checkrow">
+        <input type="checkbox" id="disp">
+        <label for="disp">7-seg shows live PWM states (disp=1)</label>
+      </div>
+      <div class="checkrow">
+        <input type="checkbox" id="periodFirst">
+        <label for="periodFirst">load period before duty (order swap)</label>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button id="btnConfigure" disabled>Configure</button>
+        <button id="btnCapture" class="primary" disabled>Capture</button>
+        <button id="btnStatus" disabled title="Read back project/pin state">Status</button>
+      </div>
+      <div class="hint" id="installHint">
+        <a href="#" id="btnReinstall">Reinstall board app</a>
+      </div>
+    </div>
+  </aside>
+
+  <section class="stage">
+    <div class="panel">
+      <h2>Captured waveforms — uio_out[7:4]</h2>
+      <div id="plotEmpty">
+        <div>No capture yet</div>
+        <div style="font-size:12px">Connect the board, Configure, then Capture.
+          Scroll to zoom, drag to pan, camera icon saves a PNG.</div>
+      </div>
+      <div id="plot" style="display:none"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Measurements</h2>
+      <table id="measTable">
+        <thead><tr>
+          <th>Channel</th><th>Programmed<br>per / duty / ph</th>
+          <th>Freq (Hz)</th><th>Period (clks)</th>
+          <th>Duty (%)</th><th>Rise offset (clks)</th>
+        </tr></thead>
+        <tbody id="measBody">
+          <tr><td colspan="6" style="text-align:center;color:var(--muted)">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <details open>
+        <summary>Console
+          <button class="mini" id="btnClearLog" type="button">Clear</button>
+        </summary>
+        <div id="log" style="margin-top:8px"></div>
+      </details>
+    </div>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+/* ---------------- constants & UI state ---------------- */
+
+const CH_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500'];
+const BOARD_FILES = ['__init__.py', 'app.py', 'capture.py'];
+const BOARD_DIR = '/examples/wokwi_wokwipwm';
+const DEFAULTS = [
+  { en: true, period: 99,  duty: 50,  phase: 0  },
+  { en: true, period: 99,  duty: 50,  phase: 25 },
+  { en: true, period: 99,  duty: 50,  phase: 50 },
+  { en: true, period: 199, duty: 150, phase: 0  },
+];
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+
+function log(msg, cls) {
+  // strip ANSI color/escape sequences and stray control chars from
+  // board output (the TT SDK logs with terminal colors)
+  msg = String(msg)
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+  if (!msg.trim()) return;
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setStatus(text, cls) {
+  const el = $('status');
+  el.textContent = text;
+  el.className = 'pill' + (cls ? ' ' + cls : '');
+}
+
+/* channel control cards */
+const chanBox = $('channels');
+DEFAULTS.forEach((d, ch) => {
+  const row = document.createElement('div');
+  row.className = 'chan';
+  row.innerHTML = `
+    <div class="tag">
+      <input type="checkbox" id="en${ch}" ${d.en ? 'checked' : ''}>
+      <span class="dot" style="background:${CH_COLORS[ch]}"></span>
+      <label class="name" for="en${ch}">PWM${ch}</label>
+    </div>
+    <div class="field"><span>period</span>
+      <input type="number" id="per${ch}" value="${d.period}" min="0" max="255"></div>
+    <div class="field"><span>duty</span>
+      <input type="number" id="dut${ch}" value="${d.duty}" min="0" max="255"></div>
+    <div class="field"><span>phase</span>
+      <input type="number" id="pha${ch}" value="${d.phase}" min="0" max="255"
+             ${ch === 0 ? 'disabled title="PWM0 has no phase register"' : ''}></div>
+    <div class="field"><span>freq</span>
+      <input type="text" class="ro" id="frq${ch}" readonly tabindex="-1"
+             title="expected output: clock / (period + 1)"></div>`;
+  chanBox.appendChild(row);
+  $('en' + ch).addEventListener('change', () => {
+    const on = $('en' + ch).checked;
+    ['per', 'dut', 'pha'].forEach(p => {
+      if (!(ch === 0 && p === 'pha')) $(p + ch).disabled = !on;
+    });
+    updateFreqs();
+  });
+  $('per' + ch).addEventListener('input', updateFreqs);
+});
+
+function fmtHz(hz) {
+  if (!isFinite(hz)) return '—';
+  if (hz >= 1e6) return (hz / 1e6).toFixed(2) + ' MHz';
+  if (hz >= 1e3) return (hz / 1e3).toFixed(2) + ' kHz';
+  return hz.toFixed(1) + ' Hz';
+}
+
+function updateFreqs() {
+  const clk = Math.max(1, Math.round(+$('clockHz').value || 0));
+  for (let ch = 0; ch < 4; ch++) {
+    const period = +$('per' + ch).value & 255;
+    $('frq' + ch).value = $('en' + ch).checked ? fmtHz(clk / (period + 1)) : '—';
+  }
+}
+
+/* ---------------- MicroPython raw-REPL over WebSerial ---------------- */
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+class MpBoard {
+  constructor() {
+    this.port = null; this.buf = []; this.raw = false;
+    this.closing = false; this.noRawPaste = false;
+  }
+
+  get connected() { return !!this.port && !this.closing; }
+
+  async connect() {
+    this.port = await navigator.serial.requestPort({
+      filters: [{ usbVendorId: 0x2E8A }]   // Raspberry Pi (RP2350 MicroPython)
+    });
+    // big buffer: the capture dump bursts fast over USB CDC, and the
+    // default 255-byte buffer overruns easily while the tab is busy
+    await this.port.open({ baudRate: 115200, bufferSize: 1 << 20 });
+    // MicroPython only sends REPL output once DTR is asserted on some
+    // stacks - make it explicit rather than relying on the browser
+    try { await this.port.setSignals({ dataTerminalReady: true, requestToSend: true }); }
+    catch (e) { /* not all adapters support signals */ }
+    this.closing = false; this.raw = false; this.noRawPaste = false; this.buf = [];
+    this.writer = this.port.writable.getWriter();
+    this._readPromise = this._readLoop();
+  }
+
+  async _readLoop() {
+    let errors = 0;
+    while (this.port && !this.closing) {
+      const readable = this.port.readable;
+      if (!readable) break;
+      const reader = readable.getReader();
+      this.reader = reader;
+      let streamDone = false;
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) { streamDone = true; break; }
+          if (value) for (let i = 0; i < value.length; i++) this.buf.push(value[i]);
+        }
+      } catch (e) {
+        if (!this.closing) log('serial read error: ' + (e.message || e), 'err');
+      } finally {
+        try { reader.releaseLock(); } catch (e) {}
+      }
+      if (streamDone || this.closing) break;   // cancelled or port closing
+      // non-fatal stream error (framing/overrun): yield a real macrotask
+      // before re-acquiring so we can never spin the main thread
+      if (++errors > 10) { log('too many serial errors - giving up', 'err'); break; }
+      await sleep(50);
+    }
+  }
+
+  async close() {
+    this.closing = true;                       // stops readUntil/readN/readLoop
+    try { this.raw && this.writer && await this.write('\x02'); } catch (e) {}
+    try { await this.reader?.cancel(); } catch (e) {}
+    try { this._readPromise && await this._readPromise; } catch (e) {}
+    try { this.writer?.releaseLock(); } catch (e) {}
+    try { await this.port?.close(); } catch (e) {}
+    this.port = null; this.raw = false; this.buf = [];
+  }
+
+  async write(s) {
+    await this.writer.write(typeof s === 'string' ? enc.encode(s) : s);
+  }
+
+  _find(seq) {
+    outer:
+    for (let i = 0; i + seq.length <= this.buf.length; i++) {
+      for (let j = 0; j < seq.length; j++)
+        if (this.buf[i + j] !== seq[j]) continue outer;
+      return i;
+    }
+    return -1;
+  }
+
+  async readUntil(marker, timeoutMs) {
+    const seq = Array.from(enc.encode(marker));
+    const t0 = performance.now();
+    for (;;) {
+      if (this.closing || !this.port) throw new Error('disconnected');
+      const idx = this._find(seq);
+      if (idx >= 0) {
+        const out = this.buf.slice(0, idx);
+        this.buf = this.buf.slice(idx + seq.length);
+        return dec.decode(new Uint8Array(out));
+      }
+      if (performance.now() - t0 > timeoutMs)
+        throw new Error(`timeout waiting for ${JSON.stringify(marker)}`);
+      await sleep(15);
+    }
+  }
+
+  async readN(n, timeoutMs) {
+    const t0 = performance.now();
+    while (this.buf.length < n) {
+      if (this.closing || !this.port) throw new Error('disconnected');
+      if (performance.now() - t0 > timeoutMs) throw new Error('timeout reading bytes');
+      await sleep(10);
+    }
+    return this.buf.splice(0, n);
+  }
+
+  async enterRaw() {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      this.buf = [];
+      await this.write('\r\x03');     // interrupt any running code
+      await sleep(150);
+      await this.write('\x03');
+      await sleep(150);
+      this.buf = [];
+      await this.write('\r\x01');     // ctrl-A: raw REPL
+      try {
+        await this.readUntil('raw REPL; CTRL-B to exit', 2500);
+        await this.readUntil('>', 1500).catch(() => {});
+        this.raw = true;
+        return;
+      } catch (e) {
+        const got = dec.decode(new Uint8Array(this.buf.slice(-200))).trim();
+        log(`raw REPL attempt ${attempt}/3 failed` +
+            (got ? `; board sent: ${JSON.stringify(got)}` : '; no data received'), 'err');
+        if (!got) log('hint: close any mpremote/REPL session holding the port, ' +
+                      'or unplug/replug the board', 'dim');
+      }
+    }
+    throw new Error('could not enter raw REPL');
+  }
+
+  /* flow-controlled raw-paste upload; throws if unsupported */
+  async _rawPasteWrite(bytes) {
+    await this.write('\x05A\x01');
+    const hdr = await this.readN(2, 1500);
+    if (!(hdr[0] === 0x52 && hdr[1] === 0x01))        // expect 'R\x01'
+      throw new Error('raw-paste not supported');
+    const ws = await this.readN(2, 1500);
+    const winSize = ws[0] | (ws[1] << 8);
+    let win = winSize, i = 0;
+    while (i < bytes.length) {
+      while (this.buf.length && this.buf[0] === 0x01) { this.buf.shift(); win += winSize; }
+      if (win === 0) {
+        const b = await this.readN(1, 10000);
+        if (b[0] === 0x01) win += winSize;
+        else if (b[0] === 0x04) { await this.write('\x04'); throw new Error('device aborted paste'); }
+        continue;
+      }
+      const n = Math.min(win, bytes.length - i, 1024);
+      await this.writer.write(bytes.subarray(i, i + n));
+      i += n; win -= n;
+    }
+    await this.write('\x04');
+    await this.readUntil('\x04', 5000);               // end-of-data ack
+  }
+
+  /* Execute code; returns stdout. */
+  async exec(code, timeoutMs = 30000) {
+    if (!this.raw) await this.enterRaw();
+    this.buf = [];
+    const bytes = enc.encode(code);
+    let pasted = false;
+    if (!this.noRawPaste) {
+      try {
+        await this._rawPasteWrite(bytes);
+        pasted = true;
+      } catch (e) {
+        this.noRawPaste = true;
+        log('raw-paste unavailable (' + (e.message || e) + '); using classic raw mode', 'dim');
+        try { await this.write('\x04'); } catch (e2) {}
+        await sleep(200);
+        this.raw = false;
+        await this.enterRaw();                        // resync cleanly
+        this.buf = [];
+      }
+    }
+    if (!pasted) {
+      for (let i = 0; i < bytes.length; i += 256) {
+        await this.writer.write(bytes.subarray(i, i + 256));
+        await sleep(10);
+      }
+      await this.write('\x04');
+      const ok = await this.readN(2, 5000);
+      if (!(ok[0] === 0x4F && ok[1] === 0x4B)) throw new Error('raw exec: no OK response');
+    }
+    const out = await this.readUntil('\x04', timeoutMs);   // stdout
+    const err = await this.readUntil('\x04', 5000);        // stderr
+    await this.readUntil('>', 3000).catch(() => {});
+    if (err.trim()) throw new Error('board error:\n' + err.trim());
+    return out;
+  }
+}
+
+const board = new MpBoard();
+
+/* ---------------- board app install ---------------- */
+
+function pyStr(s) {
+  return "'" + s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
+}
+
+async function fetchBoardFiles() {
+  const files = {};
+  let source = 'fetched from board/';
+  try {
+    // when served over http, always use the live sources next to the page
+    for (const name of BOARD_FILES) {
+      const res = await fetch('../board/wokwi_wokwipwm/' + name, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${name}`);
+      files[name] = await res.text();
+    }
+  } catch (e) {
+    // file:// blocks fetch - fall back to the embedded snapshot
+    if (!window.BOARD_SRC) throw new Error(
+      "can't load board app sources: fetch failed (" + (e.message || e) +
+      ') and no embedded board_src.js found. Regenerate it with ' +
+      '"python3 web/build_src.py" or serve the pwm-test directory over http.');
+    for (const name of BOARD_FILES) {
+      if (!(name in window.BOARD_SRC)) throw new Error('board_src.js is missing ' + name);
+      files[name] = window.BOARD_SRC[name];
+    }
+    source = 'embedded snapshot (board_src.js)';
+  }
+  const m = files['app.py'].match(/APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
+  log('board app sources: ' + source, 'dim');
+  return { files, version: m ? m[1] : 'unknown' };
+}
+
+async function boardAppVersion() {
+  const out = await board.exec(
+    "try:\n" +
+    "    import examples.wokwi_wokwipwm as W\n" +
+    "    print('V ' + W.APP_VERSION)\n" +
+    "except Exception as e:\n" +
+    "    print('MISSING ' + repr(e))\n");
+  const line = out.trim().split('\n').pop();
+  return line.startsWith('V ') ? line.slice(2).trim() : null;
+}
+
+async function installBoardApp(files) {
+  await board.exec(
+    "import os\n" +
+    "def _mk(p):\n" +
+    "    try: os.stat(p)\n" +
+    "    except OSError:\n" +
+    "        if p.endswith('.py'): open(p,'w').close()\n" +
+    "        else: os.mkdir(p)\n" +
+    "_mk('/examples')\n" +
+    "_mk('/examples/__init__.py')\n" +
+    `_mk('${BOARD_DIR}')\n` +
+    "print('dirs ok')\n");
+  for (const name of BOARD_FILES) {
+    const b64 = btoa(unescape(encodeURIComponent(files[name])));
+    let code = "import binascii\nf = open('" + BOARD_DIR + '/' + name + "', 'wb')\n";
+    for (let i = 0; i < b64.length; i += 4000)
+      code += "f.write(binascii.a2b_base64(" + pyStr(b64.slice(i, i + 4000)) + "))\n";
+    code += "f.close()\nimport os\nprint('wrote', " + pyStr(name) + ", os.stat('" +
+            BOARD_DIR + '/' + name + "')[6], 'bytes')\n";
+    const out = await board.exec(code, 30000);
+    log(out.trim(), 'dim');
+  }
+  // drop cached modules so the fresh code imports
+  const out = await board.exec(
+    "import sys\n" +
+    "for k in list(sys.modules):\n" +
+    "    if 'wokwi_wokwipwm' in k or k == 'examples': del sys.modules[k]\n" +
+    "import examples.wokwi_wokwipwm as W\n" +
+    "print('installed', W.APP_VERSION)\n");
+  log(out.trim());
+}
+
+async function ensureBoardApp() {
+  const { files, version } = await fetchBoardFiles();
+  const onBoard = await boardAppVersion();
+  if (onBoard === version) {
+    log(`board app v${onBoard} already installed`);
+  } else {
+    log(onBoard ? `board app v${onBoard} -> updating to v${version}`
+                : `board app not found -> installing v${version}`);
+    await installBoardApp(files);
+  }
+  $('verInfo').textContent = `board app v${version}`;
+  return version;
+}
+
+/* ---------------- app actions ---------------- */
+
+let lastCapture = null;   // {meta, channels}
+let lastCfg = null;
+
+function currentCfg() {
+  const pwms = [];
+  for (let ch = 0; ch < 4; ch++) {
+    if (!$('en' + ch).checked) { pwms.push(null); continue; }
+    const p = [ +$('per' + ch).value & 255, +$('dut' + ch).value & 255 ];
+    if (ch > 0) p.push(+$('pha' + ch).value & 255);
+    pwms.push(p);
+  }
+  return {
+    clock_hz: Math.max(10, Math.round(+$('clockHz').value)),
+    duty_first: !$('periodFirst').checked,
+    disp: $('disp').checked,
+    ctrl: 0,
+    pwms,
+  };
+}
+
+function setBusy(busy, label) {
+  ['btnConfigure', 'btnCapture', 'btnSetClock', 'btnStatus'].forEach(id =>
+    $(id).disabled = busy || !board.connected);
+  if (busy) setStatus(label || 'Working…', 'busy');
+  else if (board.connected) setStatus('Connected', 'ok');
+  else setStatus('Disconnected');
+}
+
+async function doConnect() {
+  if (board.connected) {
+    await board.close();
+    $('btnConnect').textContent = 'Connect board';
+    setBusy(false);
+    log('disconnected');
+    return;
+  }
+  if (!('serial' in navigator)) {
+    log('Web Serial not available - use Chrome or Edge over http://localhost or https', 'err');
+    return;
+  }
+  try {
+    setStatus('Connecting…', 'busy');
+    await board.connect();
+    log('serial port open, entering raw REPL…');
+    await board.enterRaw();
+    await ensureBoardApp();
+    $('btnConnect').textContent = 'Disconnect';
+    setBusy(false);
+    log('ready - Configure to program the PWMs');
+  } catch (e) {
+    log(String(e.message || e), 'err');
+    await board.close();
+    setStatus('Disconnected');
+    setBusy(false);
+  }
+}
+
+async function doSetClock() {
+  const hz = Math.max(10, Math.round(+$('clockHz').value));
+  setBusy(true, 'Setting clock…');
+  try {
+    const out = await board.exec(
+      "import examples.wokwi_wokwipwm as W\n" +
+      `print('clock =', W.set_clock_hz(${hz}), 'Hz')\n`);
+    log(out.trim());
+  } catch (e) { log(String(e.message || e), 'err'); }
+  setBusy(false);
+}
+
+async function doConfigure() {
+  const cfg = currentCfg();
+  setBusy(true, 'Configuring…');
+  try {
+    const out = await board.exec(
+      "import json\n" +
+      "import examples.wokwi_wokwipwm as W\n" +
+      "W.configure(json.loads(" + pyStr(JSON.stringify(cfg)) + "))\n" +
+      "W.status()\n", 60000);
+    out.trim().split('\n').forEach(l =>
+      log(l, (l.startsWith('CONFIGURED') || l.startsWith('STATUS')) ? '' : 'dim'));
+    lastCfg = cfg;
+  } catch (e) { log(String(e.message || e), 'err'); }
+  setBusy(false);
+}
+
+async function doCapture() {
+  const seconds = Math.max(0.05, +$('seconds').value);
+  const sampleHz = Math.max(2000, Math.round(+$('sampleHz').value));
+  setBusy(true, `Capturing ${seconds}s…`);
+  try {
+    const out = await board.exec(
+      "import examples.wokwi_wokwipwm as W\n" +
+      `W.capture_dump(${seconds}, ${sampleHz})\n`,
+      seconds * 1000 + 60000);
+    const parsed = parseDump(out);
+    lastCapture = parsed;
+    log(`capture: ${parsed.meta.n_samples} samples @ ${parsed.meta.sample_hz} Hz` +
+        ` (project clock ${parsed.meta.clock_hz} Hz)`);
+    renderPlot(parsed);
+    renderMeasurements(parsed);
+  } catch (e) { log(String(e.message || e), 'err'); }
+  setBusy(false);
+}
+
+/* ---------------- dump parsing & measurement ---------------- */
+
+function parseDump(text) {
+  let meta = null; const hexLines = []; let inData = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line.startsWith('META ')) meta = JSON.parse(line.slice(5));
+    else if (line === 'DATA_BEGIN') inData = true;
+    else if (line === 'DATA_END') inData = false;
+    else if (inData) hexLines.push(line);
+    else if (line) log('[board] ' + line, 'dim');
+  }
+  if (!meta || !hexLines.length) throw new Error('no capture data in board output');
+  const words = [];
+  for (const line of hexLines)
+    for (let i = 0; i + 8 <= line.length; i += 8)
+      words.push(parseInt(line.slice(i, i + 8), 16) >>> 0);
+  const n = Math.min(meta.n_samples, words.length * 8);
+  const channels = [0, 1, 2, 3].map(() => new Uint8Array(n));
+  for (let i = 0; i < n; i++) {
+    const nib = (words[i >> 3] >>> ((i & 7) << 2)) & 0xF;
+    for (let ch = 0; ch < 4; ch++) channels[ch][i] = (nib >> ch) & 1;
+  }
+  return { meta, channels };
+}
+
+function measure(channels, meta) {
+  const { sample_hz, clock_hz } = meta;
+  const firstRises = [];
+  const results = channels.map((data, ch) => {
+    const rises = [];
+    for (let i = 1; i < data.length; i++)
+      if (data[i] && !data[i - 1]) rises.push(i);
+    firstRises.push(rises.length ? rises[0] : null);
+    const r = { ch, edges: rises.length, freq: null, periodClks: null,
+                duty: null, phaseClks: null };
+    if (rises.length >= 2) {
+      const periodSamples = (rises[rises.length - 1] - rises[0]) / (rises.length - 1);
+      r.freq = sample_hz / periodSamples;
+      r.periodClks = periodSamples * clock_hz / sample_hz;
+      let hi = 0;
+      for (let i = rises[0]; i < rises[rises.length - 1]; i++) hi += data[i];
+      r.duty = 100 * hi / (rises[rises.length - 1] - rises[0]);
+    }
+    return r;
+  });
+  if (firstRises[0] !== null)
+    results.forEach((r, ch) => {
+      if (firstRises[ch] !== null)
+        r.phaseClks = (firstRises[ch] - firstRises[0]) * clock_hz / sample_hz;
+    });
+  return results;
+}
+
+/* ---------------- rendering ---------------- */
+
+const LANE = 1.6;
+
+function stepTrace(data, dtMs, ch) {
+  // emit points only at transitions - crisp edges, tiny point count
+  const off = (3 - ch) * LANE;
+  const x = [0], y = [data[0] + off], cd = [data[0] ? 'HIGH' : 'LOW'];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i] !== data[i - 1]) {
+      const t = i * dtMs;
+      x.push(t, t);
+      y.push(data[i - 1] + off, data[i] + off);
+      cd.push(data[i - 1] ? 'HIGH' : 'LOW', data[i] ? 'HIGH' : 'LOW');
+    }
+  }
+  const tEnd = (data.length - 1) * dtMs;
+  x.push(tEnd); y.push(data[data.length - 1] + off);
+  cd.push(data[data.length - 1] ? 'HIGH' : 'LOW');
+  return {
+    x, y, customdata: cd,
+    type: x.length > 20000 ? 'scattergl' : 'scatter',
+    mode: 'lines',
+    name: 'PWM' + ch,
+    line: { color: CH_COLORS[ch], width: 2 },
+    hovertemplate: 'PWM' + ch + ': %{customdata}<extra></extra>',
+  };
+}
+
+function renderPlot({ meta, channels }) {
+  const dtMs = 1000 / meta.sample_hz;
+  const traces = channels.map((d, ch) => stepTrace(d, dtMs, ch));
+  const layout = {
+    paper_bgcolor: '#1a1a19',
+    plot_bgcolor: '#1a1a19',
+    font: { family: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+            color: '#c3c2b7', size: 12 },
+    margin: { l: 64, r: 16, t: 10, b: 44 },
+    xaxis: {
+      title: { text: 'time (ms)', font: { color: '#898781' } },
+      gridcolor: '#2c2c2a', zeroline: false, color: '#898781',
+    },
+    yaxis: {
+      tickvals: [0, 1, 2, 3].map(ch => (3 - ch) * LANE + 0.5),
+      ticktext: ['PWM0', 'PWM1', 'PWM2', 'PWM3'],
+      range: [-0.5, 3 * LANE + 1.5],
+      showgrid: false, zeroline: false, fixedrange: true,
+      color: '#c3c2b7',
+    },
+    showlegend: true,
+    legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.08,
+              font: { color: '#c3c2b7' } },
+    hovermode: 'x',
+    dragmode: 'pan',
+  };
+  const config = {
+    responsive: true, scrollZoom: true, displaylogo: false,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'],
+    toImageButtonOptions: { format: 'png', filename: 'wokwipwm_capture', scale: 2 },
+  };
+  $('plotEmpty').style.display = 'none';
+  $('plot').style.display = 'block';
+  Plotly.react('plot', traces, layout, config);
+}
+
+function renderMeasurements({ meta, channels }) {
+  const results = measure(channels, meta);
+  const cfg = lastCfg;
+  const body = $('measBody');
+  body.innerHTML = '';
+  const fmt = (v, d = 1) => v === null ? '<span class="exp">n/a</span>' : v.toFixed(d);
+  results.forEach(r => {
+    const p = cfg && cfg.pwms[r.ch];
+    let progTxt = '<span class="exp">unchanged</span>', expFreq = '', expDuty = '';
+    if (p) {
+      const [period, duty, phase = 0] = p;
+      progTxt = `${period} / ${duty} / ${r.ch === 0 ? 0 : phase}`;
+      expFreq = `<div class="exp">exp ${(meta.clock_hz / (period + 1)).toFixed(1)}</div>`;
+      expDuty = `<div class="exp">exp ${(100 * (period - duty + 1) / (period + 1)).toFixed(1)}</div>`;
+    }
+    body.insertAdjacentHTML('beforeend', `<tr>
+      <td class="chname"><span class="dot" style="background:${CH_COLORS[r.ch]}"></span>PWM${r.ch}</td>
+      <td>${progTxt}</td>
+      <td>${fmt(r.freq)}${expFreq}</td>
+      <td>${fmt(r.periodClks)}</td>
+      <td>${fmt(r.duty)}${expDuty}</td>
+      <td>${fmt(r.phaseClks)}</td>
+    </tr>`);
+  });
+}
+
+/* ---------------- wire up ---------------- */
+
+async function doStatus() {
+  setBusy(true, 'Reading status…');
+  try {
+    const out = await board.exec(
+      "import examples.wokwi_wokwipwm as W\nW.status()\n");
+    out.trim().split('\n').forEach(l => log(l));
+  } catch (e) { log(String(e.message || e), 'err'); }
+  setBusy(false);
+}
+
+$('btnConnect').addEventListener('click', doConnect);
+$('btnSetClock').addEventListener('click', doSetClock);
+$('btnConfigure').addEventListener('click', doConfigure);
+$('btnCapture').addEventListener('click', doCapture);
+$('btnStatus').addEventListener('click', doStatus);
+$('clockHz').addEventListener('input', updateFreqs);
+updateFreqs();
+
+$('disp').addEventListener('change', async () => {
+  if (!board.connected) return;      // Configure will apply it later
+  const on = $('disp').checked;
+  setBusy(true, 'Setting disp…');
+  try {
+    await board.exec("import examples.wokwi_wokwipwm as W\n" +
+                     `W.set_disp(${on ? 'True' : 'False'})\n`);
+    log('disp = ' + (on ? '1 (7-seg shows PWM states)' : '0 (7-seg shows addr index)'));
+  } catch (e) { log(String(e.message || e), 'err'); }
+  setBusy(false);
+});
+$('btnClearLog').addEventListener('click', e => {
+  e.preventDefault();
+  e.stopPropagation();          // don't toggle the details fold
+  logEl.innerHTML = '';
+});
+$('btnReinstall').addEventListener('click', async e => {
+  e.preventDefault();
+  if (!board.connected) { log('connect first', 'err'); return; }
+  setBusy(true, 'Installing…');
+  try {
+    const { files } = await fetchBoardFiles();
+    await installBoardApp(files);
+  } catch (err) { log(String(err.message || err), 'err'); }
+  setBusy(false);
+});
+
+if ('serial' in navigator) {
+  navigator.serial.addEventListener('disconnect', async () => {
+    log('board unplugged', 'err');
+    await board.close();
+    $('btnConnect').textContent = 'Connect board';
+    setBusy(false);
+  });
+} else {
+  log('Web Serial not available in this browser - use Chrome or Edge ' +
+      '(served from http://localhost or https)', 'err');
+}
+
+log('WokwiPWM Commander ready');
+</script>
+</body>
+</html>
